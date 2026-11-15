@@ -46,11 +46,6 @@ export const PROJECTS: Project[] = [
     link: { href: 'https://www.way.com/parkingdetails/9311702/315-west-33rd-street-parking/?cid=9391484&cid-pricing-type=Monthly', text: 'See a live page' },
   },
   {
-    name: 'Mileage Tracker search pages', type: 'Search pages',
-    summary: 'Built the search pages for the Mileage Tracker vertical.',
-    stats: [{ value: '100,000+', label: 'organic visits in 6 months' }, { value: '150+', label: 'completed transactions' }],
-  },
-  {
     name: 'SEO page revamp', type: 'Static pages',
     summary: 'Revamped Way.com’s SEO-focused pages, improving organic visibility and stabilizing search rankings.',
     stats: [{ value: 'Top spots', label: 'in Google Map Pack' }],

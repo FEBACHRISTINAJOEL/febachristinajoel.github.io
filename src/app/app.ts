@@ -76,6 +76,31 @@ export class App implements AfterViewInit, OnDestroy {
     this.menuOpen.set(false);
   }
 
+  /**
+   * Saves the resume PDF straight to the device. A plain link makes many phone browsers
+   * open the PDF in a viewer instead, so the file is fetched and saved as a download.
+   * If that fails for any reason, the PDF is opened in a new tab instead.
+   */
+  async downloadResume(e: Event) {
+    e.preventDefault();
+    const url = this.profile.resume;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Resume not found');
+      const blob = new Blob([await res.blob()], { type: 'application/pdf' });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = url;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    } catch {
+      window.open(url, '_blank', 'noopener');
+    }
+  }
+
   toggleMenu() {
     this.menuOpen.update((o) => !o);
   }
@@ -88,7 +113,15 @@ export class App implements AfterViewInit, OnDestroy {
 
   @HostListener('document:click', ['$event'])
   onDocClick(e: Event) {
-    if (!(e.target as Element).closest('#mnav, .burger')) this.menuOpen.set(false);
+    const target = e.target as Element;
+    if (!target.closest('#mnav, .burger')) this.menuOpen.set(false);
+    // Smooth scroll only for clicks on in-page links (not for mouse-wheel scrolling).
+    const id = target.closest('a[href^="#"]')?.getAttribute('href')?.slice(1);
+    const el = id ? document.getElementById(id) : null;
+    if (el) {
+      e.preventDefault();
+      el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth' });
+    }
   }
 
   glow(e: PointerEvent) {
@@ -98,7 +131,10 @@ export class App implements AfterViewInit, OnDestroy {
     el.style.setProperty('--my', e.clientY - b.top + 'px');
   }
 
-  /** Drifting dots that connect to each other, and to the cursor when it is near. */
+  /**
+   * Slowly drifting dots joined by thin lines. Kept light on purpose: no mouse tracking,
+   * 30 frames per second, and it pauses while the page is being scrolled.
+   */
   private startBackground() {
     const cv = this.host.querySelector<HTMLCanvasElement>('canvas.fx');
     const cx = cv?.getContext('2d');
@@ -106,21 +142,15 @@ export class App implements AfterViewInit, OnDestroy {
     const rm = matchMedia('(prefers-reduced-motion:reduce)').matches;
     type Dot = { x: number; y: number; vx: number; vy: number };
     let dots: Dot[] = [];
-    let W = 0, H = 0, mx = -999, my = -999, frames = 0, raf = 0, run = true, timer = 0;
-    let ink = '#fff', acc = '#f66';
+    let W = 0, H = 0, frames = 0, tick = 0, raf = 0, run = true, scrolling = false;
+    let resizeTimer = 0, scrollTimer = 0;
+    let ink = '#fff';
 
-    const colors = () => {
-      const s = getComputedStyle(document.documentElement);
-      ink = s.getPropertyValue('--ink').trim();
-      acc = s.getPropertyValue('--acc').trim();
-    };
+    const colors = () => { ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim(); };
     const size = () => {
-      const d = Math.min(devicePixelRatio || 1, 2);
       W = innerWidth; H = innerHeight;
-      cv.width = W * d; cv.height = H * d;
-      cv.style.width = W + 'px'; cv.style.height = H + 'px';
-      cx.setTransform(d, 0, 0, d, 0, 0);
-      const n = Math.round(Math.min(70, (W * H) / 20000));
+      cv.width = W; cv.height = H;
+      const n = Math.round(Math.min(60, (W * H) / 22000));
       dots = Array.from({ length: n }, () => ({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35 }));
     };
     const frame = () => {
@@ -142,29 +172,32 @@ export class App implements AfterViewInit, OnDestroy {
             cx.beginPath(); cx.moveTo(a.x, a.y); cx.lineTo(b.x, b.y); cx.stroke();
           }
         }
-        const ex = a.x - mx, ey = a.y - my, ed = ex * ex + ey * ey;
-        if (ed < 30000) {
-          cx.globalAlpha = (1 - ed / 30000) * 0.75; cx.strokeStyle = acc;
-          cx.beginPath(); cx.moveTo(a.x, a.y); cx.lineTo(mx, my); cx.stroke();
-        }
       }
     };
-    const loop = () => { if (!run) return; frame(); raf = requestAnimationFrame(loop); };
+    const loop = () => {
+      if (!run) return;
+      if (!scrolling && tick++ % 2 === 0) frame();
+      raf = requestAnimationFrame(loop);
+    };
+    const onScroll = () => {
+      scrolling = true;
+      clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => (scrolling = false), 150);
+    };
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => { size(); if (rm) frame(); }, 150);
+    };
+    const onVisibility = () => { run = !document.hidden; if (run && !rm) loop(); };
 
-    const onMove = (e: PointerEvent) => { mx = e.clientX; my = e.clientY; };
-    const onLeave = () => { mx = my = -999; };
-    const onResize = () => { clearTimeout(timer); timer = window.setTimeout(() => { size(); if (rm) frame(); }, 150); };
-    const onVis = () => { run = !document.hidden; if (run && !rm) loop(); };
-    window.addEventListener('pointermove', onMove, { passive: true });
-    document.addEventListener('pointerleave', onLeave);
+    window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize);
-    document.addEventListener('visibilitychange', onVis);
+    document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => {
-      run = false; cancelAnimationFrame(raf); clearTimeout(timer);
-      window.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerleave', onLeave);
+      run = false; cancelAnimationFrame(raf); clearTimeout(resizeTimer); clearTimeout(scrollTimer);
+      window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
-      document.removeEventListener('visibilitychange', onVis);
+      document.removeEventListener('visibilitychange', onVisibility);
     });
     size(); colors();
     if (rm) frame(); else loop();
